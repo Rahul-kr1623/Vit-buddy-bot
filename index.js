@@ -6,15 +6,15 @@ const app = express();
 // --- 🛠️ SETTINGS ---
 const BOT_NAME = 'VIT Nexus 🤖';
 const OWNER_NAME = 'Rahul';
+const WEBSITE_LINK = 'https://vitnexus.vercel.app'; // Tumhari Website ka Link
 const SUPABASE_URL = 'https://wfncmrchltcvgialghrz.supabase.co'; 
 const SUPABASE_KEY = 'sb_publishable_uiHDDn-zM1F8qCa5zu3UYQ_AAGjykvp';
 
-// Ye number Render ki settings se aayega
 const MY_PHONE_NUMBER = process.env.PHONE_NUMBER; 
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// --- KEEPER ALIVE (Render ke liye zaroori) ---
+// --- KEEPER ALIVE ---
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => { res.send('VIT Nexus Bot is Running! 🚀'); });
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
@@ -35,37 +35,32 @@ const messShortcuts = {
     'gb2': 'Mayuri', 'jmb': 'JMB', 'rassense': 'Rassense'
 };
 
-// --- 📢 DETAILED HELP MESSAGE ---
 const HELP_MESSAGE = `📢 *${BOT_NAME}*
 _Created by ${OWNER_NAME}_
 
-Here is the full list of commands you can use:
+📘 *Available Commands:*
 
-🏛 *Faculty Commands:*
-▸ *!find [name]* - Search for a faculty member's cabin and phone number.
-   _Ex: !find sanat_
+🏛 *Faculty Search:*
+▸ *!find [name]* OR *![name]*
+   Get Cabin & Contact info.
+   _Ex: !find sanat_ or just _!sanat_
 
-▸ *!faculty [name]* - View detailed ratings (Teaching, Grading, Behavior) for a faculty.
+▸ *!faculty [name]*
+   Get detailed ratings & reviews.
    _Ex: !faculty praveen_
 
-🍽 *Mess Menu Commands (Today):*
-Get the breakfast, lunch, snacks, and dinner menu instantly:
-▸ *!b1* - CRCL Boys Mess
-▸ *!b2* - Mayuri Boys Mess (Block 2-5)
-▸ *!b6* - Safal Boys Mess
-▸ *!gb1* - Dakshin Girls Mess
-▸ *!gb2* - Mayuri Girls Mess
+🍽 *Mess Menu (Today):*
+▸ *!b1* - CRCL Boys
+▸ *!b2* - Mayuri Boys
+▸ *!b6* - Safal Boys
+▸ *!gb1* - Dakshin Girls
+▸ *!gb2* - Mayuri Girls
 
-🗓 *Weekly Menu Commands:*
-Check the menu for any specific day:
+🗓 *Weekly Menu:*
 ▸ *!menu [mess] [day]*
-   _Ex: !menu b6 monday_
-   _Ex: !menu mayuri tomorrow_
+   _Ex: !menu b6 friday_
 
-ℹ *Other:*
-▸ *!help* - Show this command list again.
-
-_Bot is online 24/7. Just type a command!_
+ℹ *!help* - Show this menu.
 `;
 
 // --- MAIN LOGIC ---
@@ -74,15 +69,13 @@ async function connectToWhatsApp() {
 
     const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: false, // QR Code band
+        printQRInTerminal: false,
         logger: require('pino')({ level: 'silent' }),
-        browser: ["Ubuntu", "Chrome", "20.0.04"], // Linux browser dikhayenge
+        browser: ["Ubuntu", "Chrome", "20.0.04"],
     });
 
-    // --- PAIRING CODE LOGIC ---
     if (!sock.authState.creds.registered) {
         console.log("Waiting for pairing code...");
-        
         if (MY_PHONE_NUMBER) {
             setTimeout(async () => {
                 try {
@@ -93,7 +86,7 @@ async function connectToWhatsApp() {
                 }
             }, 4000);
         } else {
-            console.log("❌ PHONE_NUMBER environment variable missing on Render!");
+            console.log("❌ PHONE_NUMBER variable missing!");
         }
     }
 
@@ -101,13 +94,12 @@ async function connectToWhatsApp() {
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
-        
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('Connection closed. Reconnecting...', shouldReconnect);
+            console.log('Reconnecting...', shouldReconnect);
             if (shouldReconnect) connectToWhatsApp();
         } else if (connection === 'open') {
-            console.log(`✅ ${BOT_NAME} is Connected & Online!`);
+            console.log(`✅ ${BOT_NAME} is Online!`);
         }
     });
 
@@ -119,45 +111,23 @@ async function connectToWhatsApp() {
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
         const lowerText = text.toLowerCase().trim();
 
-        if (lowerText === '!help') {
+        if (!lowerText.startsWith('!')) return; // Ignore non-commands
+
+        const commandRaw = lowerText.split(' ')[0]; 
+        const command = commandRaw.replace('!', ''); 
+
+        // 1. HELP
+        if (command === 'help') {
             await sock.sendMessage(remoteJid, { text: HELP_MESSAGE });
             return;
         }
 
-        if (lowerText.startsWith('!find') || lowerText.startsWith('!faculty')) {
-            const isRatingSearch = lowerText.startsWith('!faculty');
-            const searchQuery = text.split(' ').slice(1).join(' ');
-            if (!searchQuery) {
-                await sock.sendMessage(remoteJid, { text: '❌ Please provide a name.' });
-                return;
-            }
-            const { data } = await supabase.from('faculty').select('*').ilike('name', `%${searchQuery}%`);
-            
-            if (data && data.length > 0) {
-                let reply = isRatingSearch ? `📊 *Faculty Ratings*\n\n` : `🔍 *Faculty Contact*\n\n`;
-                data.forEach(f => {
-                    reply += `👨‍🏫 *${f.name}*\n🏠 ${f.cabin}\n`;
-                    if (isRatingSearch) {
-                        reply += `⭐ Teach: ${f.teaching_rating || 'N/A'}/5\n📝 Grade: ${f.evaluation_rating || 'N/A'}/5\n`;
-                    } else {
-                        reply += `📞 ${f.mobile || 'NA'}\n`;
-                    }
-                    reply += `────────────────\n`;
-                });
-                await sock.sendMessage(remoteJid, { text: reply });
-            } else {
-                await sock.sendMessage(remoteJid, { text: `❌ Not found: "${searchQuery}"` });
-            }
-            return;
-        }
-
-        const command = lowerText.split(' ')[0].replace('!', ''); 
-        const isMenuCommand = lowerText.startsWith('!menu') || messShortcuts[command];
-
-        if (isMenuCommand) {
+        // 2. MESS MENU COMMANDS
+        if (command === 'menu' || messShortcuts[command]) {
             const parts = lowerText.split(' ');
             let searchMess = 'Rassense'; 
             let searchDay = getDayName(0); 
+
             if (messShortcuts[command]) searchMess = messShortcuts[command];
 
             const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
@@ -171,13 +141,67 @@ async function connectToWhatsApp() {
             const { data } = await supabase.from('mess_menu').select('*').eq('mess_name', searchMess).eq('day', searchDay).single();
 
             if (data) {
-                let reply = `📅 *${data.day}'s Menu* | ${searchMess}\n`;
-                if(command.startsWith('b') || command.startsWith('gb')) reply += `📍 ${command.toUpperCase()}\n\n`; else reply += `\n`;
-                reply += `🥣 B: ${data.breakfast}\n🍛 L: ${data.lunch}\n☕ S: ${data.snacks}\n🍲 D: ${data.dinner}`;
+                let reply = `🍽 *${data.mess_name} Menu (${data.day})*\n`;
+                if(command.startsWith('b') || command.startsWith('gb')) reply += `📍 Hostel: ${command.toUpperCase()}\n\n`; else reply += `\n\n`;
+                reply += `🥣 *Breakfast:* ${data.breakfast}\n\n`;
+                reply += `🍛 *Lunch:* ${data.lunch}\n\n`;
+                reply += `☕ *Snacks:* ${data.snacks}\n\n`;
+                reply += `🍲 *Dinner:* ${data.dinner}`;
                 await sock.sendMessage(remoteJid, { text: reply });
             } else {
-                await sock.sendMessage(remoteJid, { text: `❌ No menu found.` });
+                await sock.sendMessage(remoteJid, { text: `❌ Menu not found.` });
             }
+            return;
+        }
+
+        // 3. FACULTY SEARCH (Detailed Format)
+        let isRatingSearch = false;
+        let searchQuery = '';
+
+        if (command === 'faculty') {
+            isRatingSearch = true;
+            searchQuery = text.split(' ').slice(1).join(' ');
+        } else if (command === 'find') {
+            searchQuery = text.split(' ').slice(1).join(' ');
+        } else {
+            // Direct name search (!sanat)
+            searchQuery = text.replace('!', '').trim();
+        }
+
+        if (!searchQuery) {
+            await sock.sendMessage(remoteJid, { text: '❌ Please provide a name.' });
+            return;
+        }
+
+        const { data } = await supabase.from('faculty').select('*').ilike('name', `%${searchQuery}%`);
+        
+        if (data && data.length > 0) {
+            // HEADER
+            let reply = isRatingSearch ? `📊 *Faculty Rating Results*\n` : `🔍 *Faculty Contact Results*\n`;
+            reply += `\n🔍 Search: "${searchQuery}"\n`;
+            reply += `📊 Found ${data.length} matching faculty\n`;
+            reply += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+            // BODY
+            data.forEach(f => {
+                reply += `🔍  *${f.name}*\n`;
+                reply += `📍 Cabin: ${f.cabin}\n`;
+                
+                if (isRatingSearch) {
+                    reply += `⭐ Teaching: ${f.teaching_rating || 'N/A'}/5\n`;
+                    reply += `📝 Grading: ${f.evaluation_rating || 'N/A'}/5\n`;
+                    reply += `🤝 Behavior: ${f.behavior_rating || 'N/A'}/5\n`;
+                } else {
+                    reply += `📞 Contact: ${f.mobile || 'Not Available'}\n`;
+                }
+                // Website Link
+                reply += `📝 Rate Here: ${WEBSITE_LINK}\n`;
+                reply += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+            });
+
+            await sock.sendMessage(remoteJid, { text: reply });
+        } else {
+            await sock.sendMessage(remoteJid, { text: `❌ No faculty found matching "${searchQuery}"` });
         }
     });
 }
